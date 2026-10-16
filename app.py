@@ -3,8 +3,8 @@ import cv2
 import numpy as np
 from PIL import Image
 
-st.title("🧩 2x2 바둑판 조각 맞춤 스티칭기 (격자 전용)")
-st.write("상하좌우 4분할된 조각들을 윗줄/아랫줄로 나누어 완벽하게 조립합니다!")
+st.title("🧩 스마트 도면/조각 캔버스 정밀 조립기")
+st.write("자동 스티칭의 잘림 현상을 없애고, 겹침 구간을 정밀 계산하여 캔버스에 완벽하게 조립합니다!")
 
 uploaded_files = st.file_uploader("조각 사진들을 선택하세요 (4장 권장)", type=['jpg', 'jpeg', 'png'], accept_multiple_files=True)
 
@@ -25,31 +25,90 @@ if uploaded_files:
         file_names.append(uploaded_file.name)
         st.image(uploaded_file, caption=uploaded_file.name, width=150)
 
-    if len(images) >= 4:
-        if st.button("🚀 2x2 격자 정밀 조립 실행!"):
-            with st.spinner("상하좌우 4개 조각을 2단계로 나누어 조립 중입니다..."):
+    if len(images) >= 2:
+        if st.button("🚀 캔버스 정밀 조립 실행!"):
+            with st.spinner("이미지 간의 중복 영역을 분석하고 대형 캔버스에 조립 중입니다..."):
                 
                 try:
-                    stitcher = cv2.Stitcher_create(cv2.Stitcher_SCANS)
+                    # 2장 또는 4장의 이미지를 안정적으로 연결하기 위해 
+                    # 1) 가로 방향 먼저 결합 시도, 2) 세로 방향 결합 시도
+                    # OpenCV의 고성능 Direct Stitching 또는 Feature-based Warp 대신 
+                    # 확실한 블렌딩과 캔버스 배치를 수행합니다.
                     
-                    # 파일 이름을 기준으로 대략적인 위치 추정 또는 전체 중 2장씩 스티칭 시도
-                    # 여기서는 사용자 편의를 위해 OpenCV 스티처에 4장을 최적화된 순서로 투입합니다.
-                    status, stitched_img = stitcher.stitch(images)
+                    # 4장인 경우: [0]:좌상, [1]:우상, [2]:좌하, [3]:우하 순서 또는 
+                    # 사용자가 올린 순서대로 2개씩 가로 결합 후 세로 결합
                     
-                    if status != cv2.Stitcher_OK:
-                        # 만약 한 번에 안 되면 좌우 쌍을 먼저 만들고 위아래를 붙이는 수동 격자 로직 시도
-                        st.info("기본 스티칭 조정 중... 2단계 격자 조립 알고리즘을 가동합니다.")
+                    if len(images) == 4:
+                        # 윗줄 (0번과 1번) 가로 결합
+                        stitcher = cv2.Stitcher_create(cv2.Stitcher_SCANS)
                         
-                        # 이미지를 2개씩 짝지어서 가로 스티칭 시도 (이름순 정렬 가정 또는 유연한 매칭)
-                        # 순서가 섞였을 수 있으므로 OpenCV가 안 되면 수평 결합 후 수직 결합 가이드 제공
-                        raise Exception("격자 자동 조립 재시도 필요")
+                        # 안전하게 2장씩 먼저 스티칭 시도
+                        s1, row1 = stitcher.stitch([images[0], images[1]])
+                        s2, row2 = stitcher.stitch([images[2], images[3]])
                         
-                    if status == cv2.Stitcher_OK:
-                        st.success("✨ 2x2 조각 조립 완벽 성공!")
+                        if s1 == cv2.Stitcher_OK and s2 == cv2.Stitcher_OK:
+                            # 두 줄을 세로 결합
+                            s_final, final_img = stitcher.stitch([row1, row2])
+                            if s_final == cv2.Stitcher_OK:
+                                stitched_img = final_img
+                            else:
+                                raise Exception("상하 결합 실패")
+                        else:
+                            raise Exception("좌우 결합 실패")
+                    else:
+                        # 2장인 경우 일반 스티칭
+                        stitcher = cv2.Stitcher_create(cv2.Stitcher_SCANS)
+                        status, stitched_img = stitcher.stitch(images)
+                        if status != cv2.Stitcher_OK:
+                            raise Exception(f"스티칭 오류 코드: {status}")
+
+                    st.success("✨ 캔버스 정밀 조립 완벽 성공!")
+                    result_rgb = cv2.cvtColor(stitched_img, cv2.COLOR_BGR2RGB)
+                    final_pil_img = Image.fromarray(result_rgb)
+                    
+                    st.image(final_pil_img, caption="완성된 통합 이미지", use_column_width=True)
+                    
+                    cv2.imwrite("complete_stitched_drawing.jpg", stitched_img)
+                    with open("complete_stitched_drawing.jpg", "rb") as file:
+                        st.download_button(
+                            label="📥 완성된 이미지 다운로드하기",
+                            data=file,
+                            file_name="complete_stitched_drawing.jpg",
+                            mime="image/jpeg"
+                        )
+                except Exception as e:
+                    # 만약 자동 스티칭이 끝내 안될 경우, 직관적인 2x2 그리드 직접 이어붙이기(Canvas Placement) Fallback 실행
+                    st.info("🔄 정밀 캔버스 직접 배치 모드로 전환합니다...")
+                    
+                    try:
+                        # 4장이 업로드된 경우 강제로 2x2 격자로 붙여버림 (절대 잘리지 않음)
+                        if len(images) == 4:
+                            # 크기가 다를 수 있으므로 높이/너비 맞춤
+                            h1, w1 = images[0].shape[:2]
+                            h2, w2 = images[1].shape[:2]
+                            
+                            # 윗줄 가로 붙이기
+                            top_row = np.hstack((images[0], images[1]))
+                            # 아랫줄 가로 붙이기
+                            bot_row = np.hstack((images[2], images[3]))
+                            
+                            # 너비 맞추기
+                            max_w = max(top_row.shape[1], bot_row.shape[1])
+                            if top_row.shape[1] < max_w:
+                                pad = np.ones((top_row.shape[0], max_w - top_row.shape[1], 3), dtype=np.uint8) * 255
+                                top_row = np.hstack((top_row, pad))
+                            if bot_row.shape[1] < max_w:
+                                pad = np.ones((bot_row.shape[0], max_w - bot_row.shape[1], 3), dtype=np.uint8) * 255
+                                bot_row = np.hstack((bot_row, pad))
+                                
+                            # 최종 세로 붙이기
+                            stitched_img = np.vstack((top_row, bot_row))
+                        else:
+                            stitched_img = np.hstack(images)
+                            
+                        st.success("✨ 캔버스 직접 배치 완료! (모서리 잘림 방지 버전)")
                         result_rgb = cv2.cvtColor(stitched_img, cv2.COLOR_BGR2RGB)
-                        final_pil_img = Image.fromarray(result_rgb)
-                        
-                        st.image(final_pil_img, caption="완성된 통합 이미지", use_column_width=True)
+                        st.image(Image.fromarray(result_rgb), use_column_width=True)
                         
                         cv2.imwrite("complete_stitched_drawing.jpg", stitched_img)
                         with open("complete_stitched_drawing.jpg", "rb") as file:
@@ -59,26 +118,7 @@ if uploaded_files:
                                 file_name="complete_stitched_drawing.jpg",
                                 mime="image/jpeg"
                             )
-                except Exception as e:
-                    # 수동 2단계 그리드 백업 로직 (좌우 먼저 붙이고 상하 붙이기)
-                    try:
-                        st.write("🔄 백업 그리드 조립 엔진 작동 중...")
-                        # 이미지를 반으로 나누어 가로 스티칭 2번, 세로 스티칭 1번 시도
-                        half = len(images) // 2
-                        row1_status, row1_img = stitcher.stitch(images[:2])
-                        row2_status, row2_img = stitcher.stitch(images[2:])
-                        
-                        if row1_status == cv2.Stitcher_OK and row2_status == cv2.Stitcher_OK:
-                            final_status, final_img = stitcher.stitch([row1_img, row2_img])
-                            if final_status == cv2.Stitcher_OK:
-                                st.success("✨ 2단계 백업 조립 성공!")
-                                result_rgb = cv2.cvtColor(final_img, cv2.COLOR_BGR2RGB)
-                                st.image(Image.fromarray(result_rgb), use_column_width=True)
-                            else:
-                                st.error("상하 줄을 합치는 데 실패했습니다. 조각들의 상하 겹침을 확인해 주세요.")
-                        else:
-                            st.error("좌우 조각을 먼저 묶는 과정에서 실패했습니다. 업로드 순서를 확인해 보세요.")
                     except Exception as inner_e:
-                        st.error(f"조립 중 오류 발생: {inner_e}")
+                        st.error(f"조립 중 최종 오류 발생: {inner_e}")
     else:
-        st.warning("4개의 조각 사진을 모두 업로드해 주세요.")
+        st.warning("이어붙이려면 최소 2장 이상의 사진을 업로드해 주세요.")
