@@ -4,10 +4,9 @@ import numpy as np
 import os
 from PIL import Image
 
-st.title("🧩 스마트 도면/사진 자동 이어붙이기 (Stitcher)")
-st.write("여러 장의 분할 사진을 업로드하면, 찌그러짐 없이 나란히 이어 붙여줍니다!")
+st.title("🧩 스마트 도면 자동 스티칭 & 병합기")
+st.write("현장에서 여러 장으로 나눠 찍은 도면 사진을 올리면, 겹치는 부분을 자동 분석하여 하나의 완벽한 대형 도면으로 합쳐줍니다!")
 
-# 파일 업로드 기능 (여러 장 선택 가능)
 uploaded_files = st.file_uploader("도면 사진들을 선택하세요 (여러 장 선택 가능)", type=['jpg', 'jpeg', 'png'], accept_multiple_files=True)
 
 if uploaded_files:
@@ -15,45 +14,38 @@ if uploaded_files:
     
     images = []
     for uploaded_file in uploaded_files:
-        # 업로드된 파일을 OpenCV 이미지 형식으로 변환
         file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
         img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
         images.append(img)
-        
-        # 화면에 업로드된 사진 미리보기 표시
-        st.image(uploaded_file, caption=uploaded_file.name, width=300)
+        st.image(uploaded_file, caption=uploaded_file.name, width=200)
 
     if len(images) >= 2:
-        if st.button("🚀 도면 이어붙이기 실행!"):
-            with st.spinner("이미지를 나란히 이어 붙이는 중입니다..."):
-                # 기준 이미지 높이 맞추기 후 가로로 결합
-                h_base, w_base = images[0].shape[:2]
-                resized_images = []
-                for img in images:
-                    h, w = img.shape[:2]
-                    if h != h_base:
-                        new_w = int(w * (h_base / h))
-                        img = cv2.resize(img, (new_w, h_base))
-                    resized_images.append(img)
+        if st.button("🚀 정밀 자동 스티칭 실행!"):
+            with st.spinner("AI가 겹치는 영역을 분석하고 하나의 대형 도면으로 합성 중입니다... (사진 장수에 따라 잠시 꿀렁거릴 수 있습니다)"):
                 
-                result_img = np.hstack(resized_images)
+                # OpenCV 도면/문서 최적화 자동 스티처 생성
+                stitcher = cv2.Stitcher_create(cv2.Stitcher_SCANS)
+                status, stitched_img = stitcher.stitch(images)
                 
-                # OpenCV 형식을 스트림릿이 보여줄 수 있는 RGB 이미지로 변환
-                result_rgb = cv2.cvtColor(result_img, cv2.COLOR_BGR2RGB)
-                final_pil_img = Image.fromarray(result_rgb)
-                
-                st.success("✨ 이어붙이기 완료!")
-                st.image(final_pil_img, caption="완성된 대형 도면", use_column_width=True)
-                
-                # 다운로드 버튼 제공
-                # 임시 저장 후 다운로드 링크 생성
-                cv2.imwrite("complete_drawing.jpg", result_img)
-                with open("complete_drawing.jpg", "rb") as file:
-                    st.download_button(
-                        label="📥 완성된 도면 다운로드하기",
-                        data=file,
-                        file_name="complete_drawing.jpg",
-                        mime="image/jpeg"
-                    )
+                if status == cv2.Stitcher_OK:
+                    st.success("✨ 대형 도면 스티칭 완벽 성공!")
+                    
+                    # BGR을 RGB로 변환하여 화면에 표시
+                    result_rgb = cv2.cvtColor(stitched_img, cv2.COLOR_BGR2RGB)
+                    final_pil_img = Image.fromarray(result_rgb)
+                    
+                    st.image(final_pil_img, caption="완성된 통합 대형 도면", use_column_width=True)
+                    
+                    # 파일 다운로드 버튼 제공
+                    cv2.imwrite("complete_stitched_drawing.jpg", stitched_img)
+                    with open("complete_stitched_drawing.jpg", "rb") as file:
+                        st.download_button(
+                            label="📥 완성된 대형 도면 다운로드하기",
+                            data=file,
+                            file_name="complete_stitched_drawing.jpg",
+                            mime="image/jpeg"
+                        )
+                else:
+                    st.error(f"스티칭 실패 (오류 코드: {status}). 사진 간의 겹치는 영역(Overlap)이 충분한지, 혹은 특징점이 너무 적지 않은지 확인해 주세요.")
     else:
         st.warning("이어붙이려면 최소 2장 이상의 사진을 업로드해 주세요.")
