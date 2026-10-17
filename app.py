@@ -10,8 +10,8 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("🎬 영화 속 딥 줌(Deep Zoom) 부분 화질 업그레이드기")
-st.write("저화질 전체 사진 위에 고화질 부분 조각을 합성하여, 특정 구역의 선명도를 첩보 영화처럼 극적으로 올려줍니다!")
+st.title("🎬 영화 속 딥 줌(Deep Zoom) 화질 업그레이드기 + 인터랙티브 뷰어")
+st.write("저화질 전체 사진 위에 고화질 조각을 정밀 합성하고, 원하는 구역을 실시간으로 돋보기 확대(Deep Zoom)하여 원본과 고화질 결과를 비교해보세요!")
 
 col1, col2 = st.columns(2)
 
@@ -41,27 +41,26 @@ if ref_file and slice_files:
             slice_names.append(f.name)
 
     st.subheader("⚙️ 고해상도 캔버스 및 합성 설정")
-    upscale_factor = st.select_slider("🚀 전체 캔버스 확대 배율 (기본 2배 확대)", options=[1, 2, 3, 4], value=2)
+    upscale_factor = st.select_slider("🚀 전체 캔버스 확대 배율 (기본 2배 확대)", options=[2, 3, 4], value=2)
     
     if st.button("🚀 딥 줌 화질 복원 실행!", type="primary"):
         with st.spinner("저화질 캔버스를 확대하고 고화질 조각을 정밀 합성 중입니다..."):
             try:
-                # 1. 저화질 원본을 고해상도 캔버스로 확대 (LANCZOS4 보정)
                 orig_h, orig_w = ref_img.shape[:2]
                 target_w = orig_w * upscale_factor
                 target_h = orig_h * upscale_factor
                 
-                high_res_canvas = cv2.resize(ref_img, (target_w, target_h), interpolation=cv2.INTER_LANCZOS4)
+                # 1. 저화질 캔버스 확대
+                low_res_canvas = cv2.resize(ref_img, (target_w, target_h), interpolation=cv2.INTER_LANCZOS4)
+                high_res_canvas = low_res_canvas.copy()
                 
-                # 2. SIFT 특징점 매칭으로 고화질 조각 위치 정밀 합성
+                # 2. SIFT 특징점 매칭
                 sift = cv2.SIFT_create()
                 kp_ref, des_ref = sift.detectAndCompute(ref_img, None)
                 
                 success_count = 0
-                
                 for s_img, s_name in zip(slice_imgs, slice_names):
                     kp_s, des_s = sift.detectAndCompute(s_img, None)
-                    
                     if des_s is None or des_ref is None:
                         continue
                         
@@ -72,19 +71,14 @@ if ref_file and slice_files:
                     good_matches = [m for m, n in matches if m.distance < 0.7 * n.distance]
                     
                     if len(good_matches) >= 10:
-                        # 원래 저화질 좌표 찾기
                         src_pts = np.float32([kp_s[m.queryIdx].pt for m in good_matches]).reshape(-1, 1, 2)
                         dst_pts = np.float32([kp_ref[m.trainIdx].pt for m in good_matches]).reshape(-1, 1, 2)
-                        
-                        # 확대된 캔버스 좌표계로 스케일 변환
                         dst_pts_scaled = dst_pts * upscale_factor
                         
                         H, mask = cv2.findHomography(src_pts, dst_pts_scaled, cv2.RANSAC, 5.0)
                         
                         if H is not None:
-                            # 고화질 조각을 확대 캔버스 위치에 와핑하여 정밀 덮어쓰기
                             warped = cv2.warpPerspective(s_img, H, (target_w, target_h), flags=cv2.INTER_LANCZOS4)
-                            
                             gray_warped = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
                             _, mask_bin = cv2.threshold(gray_warped, 1, 255, cv2.THRESH_BINARY)
                             
@@ -96,21 +90,73 @@ if ref_file and slice_files:
                             success_count += 1
                             st.toast(f"✅ [{s_name}] 구역 화질 업그레이드 완료!")
 
+                # 세션 상태 저장 (뷰어용)
+                st.session_state["low_res"] = low_res_canvas
+                st.session_state["high_res"] = high_res_canvas
+                st.session_state["target_w"] = target_w
+                st.session_state["target_h"] = target_h
                 st.success(f"✨ 총 {success_count}개 구역의 고화질 복원이 완료되었습니다!")
-                
-                final_rgb = cv2.cvtColor(high_res_canvas, cv2.COLOR_BGR2RGB)
-                pil_img = Image.fromarray(final_rgb)
-                
-                st.image(pil_img, caption=f"화질 개선 완료본 ({target_w}x{target_h}px)", use_container_width=True)
-                
-                buf = io.BytesIO()
-                pil_img.save(buf, format="JPEG", quality=98)
-                st.download_button(
-                    "📥 초고화질 완성본 다운로드",
-                    data=buf.getvalue(),
-                    file_name="deepzoom_enhanced_image.jpg",
-                    mime="image/jpeg"
-                )
                 
             except Exception as e:
                 st.error(f"처리 중 오류가 발생했습니다: {e}")
+
+# --- 인터랙티브 돋보기 뷰어 영역 ---
+if "high_res" in st.session_state:
+    st.divider()
+    st.subheader("🔎 인터랙티브 돋보기 (Deep Zoom) 비교 뷰어")
+    
+    low_canvas = st.session_state["low_res"]
+    high_canvas = st.session_state["high_res"]
+    tw = st.session_state["target_w"]
+    th = st.session_state["target_h"]
+    
+    st.write("슬라이더로 확대를 원하는 중심 위치(X, Y)와 돋보기 비율을 조절해 보세요!")
+    
+    col_v1, col_v2, col_v3 = st.columns(3)
+    with col_v1:
+        center_x = st.slider("📍 가로 위치 (X%):", 0, 100, 50, step=1)
+    with col_v2:
+        center_y = st.slider("📍 세로 위치 (Y%):", 0, 100, 50, step=1)
+    with col_v3:
+        zoom_level = st.slider("🔍 돋보기 확대율:", 2, 10, 4, step=1)
+
+    # 중심 좌표 및 영역 Crop 계산
+    cx = int(tw * (center_x / 100.0))
+    cy = int(th * (center_y / 100.0))
+    
+    crop_w = max(50, int(tw / zoom_level))
+    crop_h = max(50, int(th / zoom_level))
+    
+    x1 = max(0, min(tw - crop_w, cx - crop_w // 2))
+    y1 = max(0, min(th - crop_h, cy - crop_h // 2))
+    x2 = x1 + crop_w
+    y2 = y1 + crop_h
+    
+    # 영역 자르기
+    crop_low = low_canvas[y1:y2, x1:x2]
+    crop_high = high_canvas[y1:y2, x1:x2]
+    
+    st.write("##### 🔬 돋보기 확대 비교 (Before vs After)")
+    col_comp1, col_comp2 = st.columns(2)
+    
+    with col_comp1:
+        st.write("🔻 **기존 저화질 확대 영역**")
+        st.image(cv2.cvtColor(crop_low, cv2.COLOR_BGR2RGB), use_container_width=True)
+        
+    with col_comp2:
+        st.write("✨ **딥 줌 고화질 복원 영역**")
+        st.image(cv2.cvtColor(crop_high, cv2.COLOR_BGR2RGB), use_container_width=True)
+        
+    st.divider()
+    st.write("##### 🖼️ 전체 완성본")
+    st.image(cv2.cvtColor(high_canvas, cv2.COLOR_BGR2RGB), caption=f"최종 딥 줌 이미지 ({tw}x{th}px)", use_container_width=True)
+    
+    buf = io.BytesIO()
+    final_pil = Image.fromarray(cv2.cvtColor(high_canvas, cv2.COLOR_BGR2RGB))
+    final_pil.save(buf, format="JPEG", quality=98)
+    st.download_button(
+        "📥 초고화질 완성본 다운로드",
+        data=buf.getvalue(),
+        file_name="deepzoom_enhanced_image.jpg",
+        mime="image/jpeg"
+    )
