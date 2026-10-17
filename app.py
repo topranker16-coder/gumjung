@@ -5,126 +5,126 @@ from PIL import Image
 import streamlit as st
 
 st.set_page_config(
-    page_title="대형 도면/그림 정밀 복원기",
-    page_icon="🎨",
+    page_title="전체 가이드 기준 대형 도면 복원기",
+    page_icon="🗺️",
     layout="wide"
 )
 
-st.title("🎨 대형 도면/그림 비율 보존 정밀 복원기")
-st.write("조각 사진들의 원본 비율을 100% 유지하고, 테두리를 정밀 조절하여 원래 그림 그대로 복원합니다!")
+st.title("🗺️ 전체 가이드 기준 대형 도면/그림 완벽 복원기")
+st.write("전체 모습이 담긴 가이드 사진 1장과 고화질 조각 사진들을 올려주시면, 위치를 자동으로 매칭하여 완벽한 고화질 도면으로 합성합니다!")
 
-# 비율 유지 리사이즈 함수
-def resize_keep_aspect(img, target_w=None, target_h=None):
+# 이미지 리사이즈 함수
+def resize_image(img, max_dim=2000):
     h, w = img.shape[:2]
-    if target_w is not None and w != target_w:
-        scale = target_w / float(w)
-        new_h = int(h * scale)
-        return cv2.resize(img, (target_w, new_h), interpolation=cv2.INTER_LANCZOS4)
-    elif target_h is not None and h != target_h:
-        scale = target_h / float(h)
-        new_w = int(w * scale)
-        return cv2.resize(img, (new_w, target_h), interpolation=cv2.INTER_LANCZOS4)
+    if max(h, w) > max_dim:
+        scale = max_dim / float(max(h, w))
+        return cv2.resize(img, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
     return img
 
-uploaded_files = st.file_uploader(
-    "나누어 찍은 그림/도면 조각 사진들을 선택하세요 (4장 권장)",
-    type=['jpg', 'jpeg', 'png'],
-    accept_multiple_files=True
-)
+col_up1, col_up2 = st.columns([1, 2])
 
-if uploaded_files:
+with col_up1:
+    st.subheader("1️⃣ 전체 기준 사진 (1장)")
+    ref_file = st.file_uploader("전체가 흐릿하게나마 다 보이는 사진", type=['jpg', 'jpeg', 'png'], key="ref_uploader")
+
+with col_up2:
+    st.subheader("2️⃣ 고화질 조각 사진들 (N장)")
+    slice_files = st.file_uploader("나누어 찍은 선명한 조각 사진들", type=['jpg', 'jpeg', 'png'], accept_multiple_files=True, key="slice_uploader")
+
+if ref_file and slice_files:
     st.divider()
-    raw_images = []
-    image_names = []
     
-    st.subheader(f"🖼️ 업로드된 조각 ({len(uploaded_files)}장)")
-    cols = st.columns(min(len(uploaded_files), 4))
-    for idx, f in enumerate(uploaded_files):
-        file_bytes = np.asarray(bytearray(f.read()), dtype=np.uint8)
-        img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+    # 1. 전체 이미지 읽기
+    ref_bytes = np.asarray(bytearray(ref_file.read()), dtype=np.uint8)
+    ref_img = cv2.imdecode(ref_bytes, cv2.IMREAD_COLOR)
+    
+    # 2. 조각 이미지들 읽기
+    slice_imgs = []
+    slice_names = []
+    for f in slice_files:
+        b = np.asarray(bytearray(f.read()), dtype=np.uint8)
+        img = cv2.imdecode(b, cv2.IMREAD_COLOR)
         if img is not None:
-            raw_images.append(img)
-            image_names.append(f.name)
-            with cols[idx % 4]:
-                st.image(cv2.cvtColor(img, cv2.COLOR_BGR2RGB), caption=f"[{idx+1}번] {f.name}", use_container_width=True)
-
-    st.divider()
-    st.subheader("⚙️ 미세 정렬 및 테두리 자르기 옵션")
+            slice_imgs.append(img)
+            slice_names.append(f.name)
+            
+    st.subheader("⚙️ 자동 위치 매칭 및 합성 설정")
+    match_sensitivity = st.slider("🔍 AI 특징점 감지 민감도 (기본 0.7)", 0.4, 0.9, 0.7, step=0.05)
     
-    col_opt1, col_opt2 = st.columns(2)
-    with col_opt1:
-        num_cols = st.number_input("가로 열(Column) 개수:", min_value=1, max_value=10, value=2, step=1)
-        crop_tb = st.slider("✂️ 상/하 테두리 자르기 (픽셀):", 0, 100, 0, step=2)
-    with col_opt2:
-        crop_lr = st.slider("✂️ 좌/우 테두리 자르기 (픽셀):", 0, 100, 0, step=2)
-
-    # 테두리 자르기 적용
-    processed_images = []
-    for img in raw_images:
-        h, w = img.shape[:2]
-        top = crop_tb if crop_tb < h // 2 else 0
-        bottom = h - crop_tb if crop_tb < h // 2 else h
-        left = crop_lr if crop_lr < w // 2 else 0
-        right = w - crop_lr if crop_lr < w // 2 else w
-        cropped = img[top:bottom, left:right]
-        processed_images.append(cropped)
-
-    st.write("##### 🔄 각 위치별 조각 지정")
-    ordered_indices = []
-    grid_cols = st.columns(num_cols)
-    for i in range(len(processed_images)):
-        col_i = i % num_cols
-        row_i = i // num_cols
-        with grid_cols[col_i]:
-            idx_sel = st.selectbox(
-                f"[{row_i+1}행 {col_i+1}열]",
-                options=list(range(len(processed_images))),
-                format_func=lambda x: f"조각 {x+1}: {image_names[x]}",
-                index=i,
-                key=f"grid_sel_{i}"
-            )
-            ordered_indices.append(idx_sel)
-
-    if st.button("🚀 원본 비율 보존 복원 실행!", type="primary"):
-        with st.spinner("비율을 유지하며 정밀 복원 중입니다..."):
+    if st.button("🚀 전체 가이드 기반 고화질 복원 실행!", type="primary"):
+        with st.spinner("전체 사진 속에서 각 고화질 조각의 위치를 AI가 정밀 검색 중입니다..."):
             try:
-                ordered_imgs = [processed_images[i] for i in ordered_indices]
+                # 작업용 캔버스 (전체 사진 크기에 맞춤)
+                canvas = ref_img.copy()
+                canvas_h, canvas_w = canvas.shape[:2]
                 
-                # 1단계: 각 행(Row)별로 높이를 표준화하되 비율 유지
-                rows = []
-                for r in range(0, len(ordered_imgs), num_cols):
-                    row_group = ordered_imgs[r:r+num_cols]
-                    if not row_group:
+                # SIFT 특징점 추출기 생성
+                sift = cv2.SIFT_create()
+                kp_ref, des_ref = sift.detectAndCompute(ref_img, None)
+                
+                matched_count = 0
+                
+                for idx, (s_img, s_name) in enumerate(zip(slice_imgs, slice_names)):
+                    kp_s, des_s = sift.detectAndCompute(s_img, None)
+                    
+                    if des_s is None or des_ref is None:
                         continue
+                        
+                    # FLANN 매처로 특징점 비교
+                    FLANN_INDEX_KDTREE = 1
+                    index_params = dict(algorithm=FLANN_INDEX_KDTREE, trees=5)
+                    search_params = dict(checks=50)
+                    flann = cv2.FlannBasedMatcher(index_params, search_params)
                     
-                    # 기준 높이
-                    ref_h = row_group[0].shape[0]
-                    resized_row = [resize_keep_aspect(img, target_h=ref_h) for img in row_group]
+                    matches = flann.knnMatch(des_s, des_ref, k=2)
                     
-                    # 가로 결합
-                    row_img = np.hstack(resized_row)
-                    rows.append(row_img)
+                    # 좋은 매칭점 골라내기
+                    good_matches = []
+                    for m, n in matches:
+                        if m.distance < match_sensitivity * n.distance:
+                            good_matches.append(m)
+                            
+                    if len(good_matches) >= 10:
+                        src_pts = np.float32([kp_s[m.queryIdx].pt for m in good_matches]).reshape(-1, 1, 2)
+                        dst_pts = np.float32([kp_ref[m.trainIdx].pt for m in good_matches]).reshape(-1, 1, 2)
+                        
+                        # 변환 행렬(Homography) 계산 (위치, 회전, 크기 변화 감지)
+                        H, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, 5.0)
+                        
+                        if H is not None:
+                            # 조각 이미지를 전체 사진 좌표계로 변환하여 덮어씌우기
+                            warped_slice = cv2.warpPerspective(s_img, H, (canvas_w, canvas_h))
+                            
+                            # 마스크 생성 (조각이 들어갈 부분만 덮어쓰기)
+                            slice_gray = cv2.cvtColor(warped_slice, cv2.COLOR_BGR2GRAY)
+                            _, mask_bin = cv2.threshold(slice_gray, 1, 255, cv2.THRESH_BINARY)
+                            
+                            # 캔버스에 합성
+                            inv_mask = cv2.bitwise_not(mask_bin)
+                            canvas_bg = cv2.bitwise_and(canvas, canvas, mask=inv_mask)
+                            slice_fg = cv2.bitwise_and(warped_slice, warped_slice, mask=mask_bin)
+                            canvas = cv2.add(canvas_bg, slice_fg)
+                            
+                            matched_count += 1
+                            st.toast(f"✅ 조각 [{s_name}] 위치 매칭 성공!")
+                    else:
+                        st.warning(f"⚠️ [{s_name}] 조각은 전체 사진에서 특징점을 충분히 찾지 못했습니다.")
 
-                # 2단계: 행 간 가로 너비 표준화 (비율 유지)
-                ref_w = rows[0].shape[1]
-                final_rows = [resize_keep_aspect(r, target_w=ref_w) for r in rows]
-
-                # 세로 결합
-                final_image = np.vstack(final_rows)
-
-                st.success("✨ 원본 비율 보존 복원 성공!")
-                final_rgb = cv2.cvtColor(final_image, cv2.COLOR_BGR2RGB)
+                st.success(f"✨ 총 {len(slice_imgs)}장 중 {matched_count}장의 고화질 조각이 전체 가이드 위치에 완벽 복원되었습니다!")
+                
+                final_rgb = cv2.cvtColor(canvas, cv2.COLOR_BGR2RGB)
                 pil_img = Image.fromarray(final_rgb)
-
-                st.image(pil_img, caption="복원된 결과물", use_container_width=True)
-
+                
+                st.image(pil_img, caption="전체 가이드 기준 완성본", use_container_width=True)
+                
                 buf = io.BytesIO()
                 pil_img.save(buf, format="JPEG", quality=98)
                 st.download_button(
-                    "📥 고화질 완성본 다운로드",
+                    "📥 완성된 대형 도면 다운로드 (고화질)",
                     data=buf.getvalue(),
-                    file_name="restored_image.jpg",
+                    file_name="guide_matched_blueprint.jpg",
                     mime="image/jpeg"
                 )
+                
             except Exception as e:
                 st.error(f"복원 중 오류가 발생했습니다: {e}")
