@@ -72,9 +72,9 @@ if uploaded_file and api_key:
                     "5. 백슬래시(\\frac, \\theta, \\angle 등)가 누락되지 않도록 명확하게 표기할 것."
                 )
 
-                try:
+               try:
                     response = client.models.generate_content(
-                        model='gemini-2.5-flash',
+                        model='gemini-3.8-flash',
                         contents=[img, prompt]
                     )
                     extracted_text = response.text
