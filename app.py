@@ -63,7 +63,7 @@ if uploaded_file and api_key:
         st.write(f"⏳ {page_num}페이지 분석 중...")
         img = images[page_num - 1]
 
-        # 이미지를 바이트로 안전하게 변환 (인코딩 에러 원천 차단)
+        # 이미지를 바이트로 안전하게 변환
         img_byte_arr = io.BytesIO()
         img.save(img_byte_arr, format='PNG')
         img_bytes = img_byte_arr.getvalue()
@@ -82,7 +82,7 @@ if uploaded_file and api_key:
 
         try:
           response = client.models.generate_content(
-              model="gemini-3.8-flash", 
+              model="gemini-1.5-flash", 
               contents=[
                   types.Part.from_bytes(
                       data=img_bytes,
