@@ -81,13 +81,13 @@ if uploaded_file and api_key:
             "5. Ensure backslashes like \\frac, \\theta, \\sum are correctly written."
         )
 
-        # 503 과부하 대비 최대 3번까지 자동 재시도 로직 적용
+        # 최신 권장 모델(gemini-3.8-flash) 및 일시적 과부하(503) 대비 자동 재시도 로직
         success = False
         extracted_text = ""
         for attempt in range(3):
           try:
             response = client.models.generate_content(
-                model="gemini-2.5-flash", 
+                model="gemini-3.8-flash", 
                 contents=[
                     types.Part.from_bytes(
                         data=img_bytes,
@@ -101,7 +101,7 @@ if uploaded_file and api_key:
             break
           except Exception as e:
             if attempt < 2:
-              time.sleep(2 * (attempt + 1)) # 2초, 4초 대기 후 재시도
+              time.sleep(2 * (attempt + 1))  # 일시적 과부하 시 2초, 4초 대기 후 재시도
             else:
               st.error(f"{page_num}페이지 처리 중 오류 발생: {e}")
 
