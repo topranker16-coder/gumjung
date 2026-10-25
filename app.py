@@ -63,18 +63,17 @@ if uploaded_file and api_key:
         st.write(f"⏳ {page_num}페이지 분석 중...")
         img = images[page_num - 1]
 
-        # 프롬프트 정의
+        # 영문 프롬프트와 명확한 지침을 사용하여 인코딩 충돌 원천 차단
         prompt = (
-            "너는 대한민국 고등학교 수학 모의고사/수능 시험지 전문 LaTeX"
-            " 변환기야.\n제시된 시험지 페이지 이미지에서 텍스트와 수학 공식을"
-            " 정확히 인식해서 LaTeX 문맥으로 추출해 줘.\n\n[지침]\n1. 모든"
-            " 한글 텍스트와 문제 번호, 보기(ㄱ, ㄴ, ㄷ), 선택지(①, ②, ③, ④,"
-            " ⑤)를 원본 그대로 유지할 것.\n2. 인라인 수식은 $...$ 형태, 블록"
-            " 수식은 $$...$$ 형태로 감쌀 것.\n3. 보기 박스나 조건 상자는 마크다운"
-            " 블록구문 ('> ')으로 표현할 것.\n4. 설명이나 서론 없이, 문서 원문"
-            " 전체를 마크다운 + LaTeX 소스로만 출력할 것.\n5."
-            " 백슬래시(\\frac, \\theta, \\angle 등)가 누락되지 않도록 명확하게"
-            " 표기할 것."
+            "You are an expert Korean high school math exam LaTeX converter. "
+            "Extract all text, math formulas, question numbers, sub-items "
+            "(ㄱ, ㄴ, ㄷ), and options (①, ②, ③, ④, ⑤) from this exam page image accurately. "
+            "Rules:\n"
+            "1. Keep all original Korean text intact.\n"
+            "2. Wrap inline math in $...$ and block math in $$...$$ without errors.\n"
+            "3. Format question boxes or condition blocks using markdown blockquotes (>).\n"
+            "4. Output ONLY the clean markdown and LaTeX source code without extra conversation.\n"
+            "5. Ensure backslashes like \\frac, \\theta, \\sum are correctly written."
         )
 
         try:
@@ -92,8 +91,7 @@ if uploaded_file and api_key:
 
       st.success("🎉 추출이 완료되었습니다!")
       st.text_area(
-          "📄 추출된 LaTeX / Markdown 소스 (복사해서 기존 정돈 앱에"
-          " 사용하세요):",
+          "📄 추출된 LaTeX / Markdown 소스:",
           value=final_output,
           height=400,
       )
