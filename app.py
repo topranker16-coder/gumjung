@@ -81,13 +81,13 @@ if uploaded_file and api_key:
             "5. Ensure backslashes like \\frac, \\theta, \\sum are correctly written."
         )
 
-        # 안정적인 gemini-2.0-flash 모델 사용 및 503 에러 대비 재시도 간격 확대 (3초, 6초, 9초)
+        # 구글 권장 모델(gemini-3.8-flash) 사용 및 503 과부하 대비 대기 시간 강화 재시도 로직
         success = False
         extracted_text = ""
         for attempt in range(4):
           try:
             response = client.models.generate_content(
-                model="gemini-2.0-flash", 
+                model="gemini-3.8-flash", 
                 contents=[
                     types.Part.from_bytes(
                         data=img_bytes,
@@ -101,7 +101,7 @@ if uploaded_file and api_key:
             break
           except Exception as e:
             if attempt < 3:
-              time.sleep(3 * (attempt + 1))  # 3초, 6초, 9초 대기 후 재시도
+              time.sleep(4 * (attempt + 1))  # 4초, 8초, 12초 간격으로 여유 있게 재시도
             else:
               st.error(f"{page_num}페이지 처리 중 오류 발생: {e}")
 
