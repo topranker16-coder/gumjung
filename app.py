@@ -1,5 +1,6 @@
 import io
 import os
+import time
 from google import genai
 from google.genai import types
 import pdf2image
@@ -80,36 +81,48 @@ if uploaded_file and api_key:
             "5. Ensure backslashes like \\frac, \\theta, \\sum are correctly written."
         )
 
-        try:
-          response = client.models.generate_content(
-              model="gemini-3.8-flash", 
-              contents=[
-                  types.Part.from_bytes(
-                      data=img_bytes,
-                      mime_type='image/png',
-                  ),
-                  prompt
-              ]
-          )
-          extracted_text = response.text
+        # 503 과부하 대비 최대 3번까지 자동 재시도 로직 적용
+        success = False
+        extracted_text = ""
+        for attempt in range(3):
+          try:
+            response = client.models.generate_content(
+                model="gemini-2.5-flash", 
+                contents=[
+                    types.Part.from_bytes(
+                        data=img_bytes,
+                        mime_type='image/png',
+                    ),
+                    prompt
+                ]
+            )
+            extracted_text = response.text
+            success = True
+            break
+          except Exception as e:
+            if attempt < 2:
+              time.sleep(2 * (attempt + 1)) # 2초, 4초 대기 후 재시도
+            else:
+              st.error(f"{page_num}페이지 처리 중 오류 발생: {e}")
+
+        if success:
           full_result.append(f"<!-- 페이지 {page_num} -->\n" + extracted_text)
-        except Exception as e:
-          st.error(f"{page_num}페이지 처리 중 오류 발생: {e}")
 
         progress_bar.progress((idx + 1) / len(selected_pages))
 
-      final_output = "\n\n---\n\n".join(full_result)
+      if full_result:
+        final_output = "\n\n---\n\n".join(full_result)
 
-      st.success("🎉 추출이 완료되었습니다!")
-      st.text_area(
-          "📄 추출된 LaTeX / Markdown 소스:",
-          value=final_output,
-          height=400,
-      )
+        st.success("🎉 추출이 완료되었습니다!")
+        st.text_area(
+            "📄 추출된 LaTeX / Markdown 소스:",
+            value=final_output,
+            height=400,
+        )
 
-      st.download_button(
-          label="📥 .md 파일로 다운로드",
-          data=final_output,
-          file_name="extracted_math_paper.md",
-          mime="text/markdown",
-      )
+        st.download_button(
+            label="📥 .md 파일로 다운로드",
+            data=final_output,
+            file_name="extracted_math_paper.md",
+            mime="text/markdown",
+        )
