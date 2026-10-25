@@ -63,7 +63,11 @@ if uploaded_file and api_key:
         st.write(f"⏳ {page_num}페이지 분석 중...")
         img = images[page_num - 1]
 
-        # 영문 프롬프트와 명확한 지침을 사용하여 인코딩 충돌 원천 차단
+        # 이미지를 바이트로 안전하게 변환 (인코딩 에러 원천 차단)
+        img_byte_arr = io.BytesIO()
+        img.save(img_byte_arr, format='PNG')
+        img_bytes = img_byte_arr.getvalue()
+
         prompt = (
             "You are an expert Korean high school math exam LaTeX converter. "
             "Extract all text, math formulas, question numbers, sub-items "
@@ -78,7 +82,14 @@ if uploaded_file and api_key:
 
         try:
           response = client.models.generate_content(
-              model="gemini-3.8-flash", contents=[img, prompt]
+              model="gemini-3.8-flash", 
+              contents=[
+                  types.Part.from_bytes(
+                      data=img_bytes,
+                      mime_type='image/png',
+                  ),
+                  prompt
+              ]
           )
           extracted_text = response.text
           full_result.append(f"<!-- 페이지 {page_num} -->\n" + extracted_text)
