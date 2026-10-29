@@ -8,9 +8,9 @@ from google.genai import types
 st.set_page_config(page_title="초순수 문제 자동 검증기", page_icon="💧", layout="wide")
 
 st.title("💧 초순수(Ultrapure) 기출변형 자동 검증 파이프라인")
-st.caption("백그라운드에서 악랄한 이의제기 공격을 N회 버텨낸 순도 100% 무결점 문제만 추출합니다.")
+st.caption("파일을 업로드하거나 텍스트를 입력하면, 백그라운드에서 악랄한 이의제기 공격을 거쳐 무결점 문제만 추출합니다.")
 
-# 1. API 키 설정 (Streamlit Secrets 또는 직접 입력)
+# 1. API 키 설정 (스트림릿 시크릿 또는 사이드바 입력)
 api_key = st.sidebar.text_input("Gemini API Key", type="password")
 if not api_key:
     st.info("👈 왼쪽 사이드바에 Gemini API Key를 입력해주세요.")
@@ -102,7 +102,21 @@ col1, col2 = st.columns([1, 1])
 with col1:
     subject = st.selectbox("과목 선택", ["ENGLISH", "MATH", "SOCIOLOGY", "ETHICS"])
     loop_count = st.slider("검증 크로스체크 횟수 (N회 반복)", min_value=1, max_value=5, value=3)
-    source_input = st.text_area("기출 원본 지문 / 문제 조건 / 개념 입력", height=300)
+    
+    # [추가된 파일 업로더 기능]
+    uploaded_file = st.file_uploader("📁 기출 원본 파일 업로드 (.txt 또는 .md)", type=["txt", "md"])
+    
+    source_input_text = ""
+    if uploaded_file is not None:
+        # 업로드된 파일 내용을 텍스트로 읽어옴
+        source_input_text = uploaded_file.getvalue().decode("utf-8")
+        st.success(f"파일 업로드 완료: {uploaded_file.name}")
+        with st.expander("업로드된 원본 내용 미리보기"):
+            st.text(source_input_text[:500] + ("..." if len(source_input_text) > 500 else ""))
+    
+    # 직접 입력도 병행 가능
+    source_input = st.text_area("또는 기출 원본 지문 / 문제 조건 / 개념 직접 입력", value=source_input_text, height=200)
+    
     run_btn = st.button("🚀 초순수 문제 생성 및 자동 검증 시작", use_container_width=True)
 
 with col2:
@@ -112,7 +126,7 @@ with col2:
 
 if run_btn:
     if not source_input.strip():
-        st.warning("원수(기출 소스) 데이터를 입력해 주세요.")
+        st.warning("파일을 업로드하거나 원수(기출 소스) 데이터를 입력해 주세요.")
         st.stop()
         
     status_area.info("1단계: 문제 초안을 생성하는 중입니다...")
