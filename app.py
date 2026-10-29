@@ -66,26 +66,26 @@ is_clean이 true인 경우는 단 0.001%의 허점도 없이 완전히 깨끗할
 """
 
 # ---------------------------------------------------------
-# Core API Functions (최신 안정 모델 적용)
+# Core API Functions (최신 추천 모델 gemini-3.8-flash 적용)
 # ---------------------------------------------------------
 
 def generate_problem(source_text: str) -> str:
     response = client.models.generate_content(
-        model="gemini-2.5-flash",
+        model="gemini-3.8-flash",
         contents=GENERATOR_PROMPT.format(source_text=source_text)
     )
     return response.text
 
 def attack_problem(problem_draft: str) -> str:
     response = client.models.generate_content(
-        model="gemini-2.5-flash",
+        model="gemini-3.8-flash",
         contents=ATTACKER_PROMPT.format(problem_draft=problem_draft)
     )
     return response.text
 
 def judge_problem(attack_report: str) -> dict:
     response = client.models.generate_content(
-        model="gemini-2.5-flash",
+        model="gemini-3.8-flash",
         contents=JUDGE_PROMPT.format(attack_report=attack_report),
         config=types.GenerateContentConfig(
             response_mime_type="application/json"
