@@ -1,128 +1,146 @@
-import io
-import os
+import streamlit as st
+import json
 import time
 from google import genai
 from google.genai import types
-import pdf2image
-from PIL import Image
-import streamlit as st
 
-st.set_page_config(
-    page_title="PDF ➡️ LaTeX 수학 시험지 변환기", page_icon="📐", layout="wide"
-)
+# Streamlit 페이지 기본 설정
+st.set_page_config(page_title="초순수 문제 자동 검증기", page_icon="💧", layout="wide")
 
-st.title("📐 PDF ➡️ LaTeX 수학 시험지 추출기")
-st.write(
-    "PDF 시험지에서 폰트 깨짐(네모 박스 □□□) 없이 완벽한 한글과 LaTeX 수식을"
-    " 추출합니다."
-)
+st.title("💧 초순수(Ultrapure) 기출변형 자동 검증 파이프라인")
+st.caption("백그라운드에서 악랄한 이의제기 공격을 N회 버텨낸 순도 100% 무결점 문제만 추출합니다.")
 
-# 사이드바: Gemini API 키 입력
-st.sidebar.header("🔑 API 설정")
-api_key = st.sidebar.text_input(
-    "Gemini API Key를 입력하세요:",
-    type="password",
-    help="Google AI Studio에서 발급받은 API 키를 입력해 주세요.",
-)
-
+# 1. API 키 설정 (Streamlit Secrets 또는 직접 입력)
+api_key = st.sidebar.text_input("Gemini API Key", type="password")
 if not api_key:
-  if "GEMINI_API_KEY" in st.secrets:
-    api_key = st.secrets["GEMINI_API_KEY"]
-  else:
-    st.info("👈 사이드바에 Gemini API Key를 입력하거나 secrets를 설정해 주세요.")
+    st.info("👈 왼쪽 사이드바에 Gemini API Key를 입력해주세요.")
+    st.stop()
 
-uploaded_file = st.file_uploader("수학 시험지 PDF 파일을 업로드하세요", type=["pdf"])
+client = genai.Client(api_key=api_key)
 
-if uploaded_file and api_key:
-  # Client 생성
-  client = genai.Client(api_key=api_key)
+# ---------------------------------------------------------
+# Prompt Templates (역할 분담 에이전트)
+# ---------------------------------------------------------
 
-  with st.spinner("PDF 페이지를 이미지로 변환 중입니다..."):
-    try:
-      pdf_bytes = uploaded_file.read()
-      images = pdf2image.convert_from_bytes(pdf_bytes, dpi=200)
-      st.success(f"총 {len(images)}페이지를 성공적으로 불러왔습니다.")
-    except Exception as e:
-      st.error(
-          f"PDF 변환 오류: {e}\n(poppler-utils 가 설치되어 있는지 확인해"
-          " 주세요.)"
-      )
-      images = []
+GENERATOR_PROMPT = """
+당신은 한국 수능 및 평가원 최고 수준의 출제위원입니다.
+아래 제공된 [기출 원본 / 지문 / 개념]을 바탕으로, 평가원 스타일의 완벽한 문항 1개를 작성하세요.
 
-  if images:
-    selected_pages = st.multiselect(
-        "변환할 페이지를 선택하세요:",
-        options=list(range(1, len(images) + 1)),
-        default=list(range(1, len(images) + 1)),
+[지시사항]
+- 발문, 지문/제시문, 보기(①~⑤), 정답, 그리고 상세 해설을 포함하세요.
+- 마크다운(Markdown) 포맷으로 출력하세요.
+
+[제공 소스]:
+{source_text}
+"""
+
+ATTACKER_PROMPT = """
+당신은 수능 시험 직후 '이의제기'를 신청하려는 가장 깐깐하고 악랄한 최상위권 수험생이자 학원 강사입니다.
+제시된 [초안 문제]를 샅샅이 뜯어보고 다음 항목을 철저히 공격하세요.
+
+[검증 항목]
+1. 복수정답 가능성: 정답 이외의 오답 선지 중 정답이 될 여지가 단 1%라도 있는가?
+2. 논리적 비약/오류: 지문/제시문과 정답 간의 논리적 모순이나 단어 해석의 왜곡이 있는가?
+3. 수학/표분석 수치 오류: 조건과 해 사이의 수치적 모순이나 계산 오류가 있는가?
+4. 평가원 학자 입장 왜곡 (사탐): 생윤/사문 학자의 어조나 특정 조건(~만, 모두 등)이 오개념을 유발하는가?
+
+[초안 문제]:
+{problem_draft}
+
+지적할 오류나 허점이 있다면 명확히 짚어내고, 이상이 전혀 없다면 "오류 없음"이라고 단호하게 말하세요.
+"""
+
+JUDGE_PROMPT = """
+당신은 수능 출제위원장입니다.
+[이의제기 공격 내용]을 검토하여 이 문제가 진짜로 '불순물(오류/복수정답 여지)'이 섞인 불량 문제인지 판정하세요.
+
+[이의제기 공격 내용]:
+{attack_report}
+
+[응답 형식 (반드시 JSON 형식으로 응답할 것)]:
+{{
+  "is_clean": true 또는 false,
+  "reason": "PASS 사유 또는 REJECT 사유 요약"
+}}
+is_clean이 true인 경우는 단 0.001%의 허점도 없이 완전히 깨끗할 때만 해당합니다.
+"""
+
+# ---------------------------------------------------------
+# Core API Functions
+# ---------------------------------------------------------
+
+def generate_problem(source_text: str) -> str:
+    response = client.models.generate_content(
+        model="gemini-2.5-pro",
+        contents=GENERATOR_PROMPT.format(source_text=source_text)
     )
+    return response.text
 
-    if st.button("🚀 선택한 페이지 LaTeX 추출 시작", type="primary"):
-      full_result = []
+def attack_problem(problem_draft: str) -> str:
+    response = client.models.generate_content(
+        model="gemini-2.5-pro",
+        contents=ATTACKER_PROMPT.format(problem_draft=problem_draft)
+    )
+    return response.text
 
-      progress_bar = st.progress(0)
-      for idx, page_num in enumerate(selected_pages):
-        st.write(f"⏳ {page_num}페이지 분석 중...")
-        img = images[page_num - 1]
-
-        # 이미지를 바이트로 안전하게 변환
-        img_byte_arr = io.BytesIO()
-        img.save(img_byte_arr, format='PNG')
-        img_bytes = img_byte_arr.getvalue()
-
-        prompt = (
-            "You are an expert Korean high school math exam LaTeX converter. "
-            "Extract all text, math formulas, question numbers, sub-items "
-            "(ㄱ, ㄴ, ㄷ), and options (①, ②, ③, ④, ⑤) from this exam page image accurately. "
-            "Rules:\n"
-            "1. Keep all original Korean text intact.\n"
-            "2. Wrap inline math in $...$ and block math in $$...$$ without errors.\n"
-            "3. Format question boxes or condition blocks using markdown blockquotes (>).\n"
-            "4. Output ONLY the clean markdown and LaTeX source code without extra conversation.\n"
-            "5. Ensure backslashes like \\frac, \\theta, \\sum are correctly written."
+def judge_problem(attack_report: str) -> dict:
+    response = client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=JUDGE_PROMPT.format(attack_report=attack_report),
+        config=types.GenerateContentConfig(
+            response_mime_type="application/json"
         )
+    )
+    return json.loads(response.text)
 
-        # 구글 권장 모델(gemini-3.8-flash) 사용 및 503 과부하 대비 대기 시간 강화 재시도 로직
-        success = False
-        extracted_text = ""
-        for attempt in range(4):
-          try:
-            response = client.models.generate_content(
-                model="gemini-3.8-flash", 
-                contents=[
-                    types.Part.from_bytes(
-                        data=img_bytes,
-                        mime_type='image/png',
-                    ),
-                    prompt
-                ]
+# ---------------------------------------------------------
+# UI Layout & User Input
+# ---------------------------------------------------------
+
+col1, col2 = st.columns([1, 1])
+
+with col1:
+    subject = st.selectbox("과목 선택", ["ENGLISH", "MATH", "SOCIOLOGY", "ETHICS"])
+    loop_count = st.slider("검증 크로스체크 횟수 (N회 반복)", min_value=1, max_value=5, value=3)
+    source_input = st.text_area("기출 원본 지문 / 문제 조건 / 개념 입력", height=300)
+    run_btn = st.button("🚀 초순수 문제 생성 및 자동 검증 시작", use_container_width=True)
+
+with col2:
+    st.subheader("📋 실시간 검증 로그 & 결과")
+    status_area = st.empty()
+    result_area = st.empty()
+
+if run_btn:
+    if not source_input.strip():
+        st.warning("원수(기출 소스) 데이터를 입력해 주세요.")
+        st.stop()
+        
+    status_area.info("1단계: 문제 초안을 생성하는 중입니다...")
+    try:
+        draft = generate_problem(source_input)
+        
+        is_passed = True
+        for i in range(1, loop_count + 1):
+            status_area.info(f"2단계-{i}회차 Filter: 악랄한 이의제기 공격 및 판정 중...")
+            
+            attack = attack_problem(draft)
+            judgment = judge_problem(attack)
+            
+            if not judgment.get("is_clean", False):
+                is_passed = False
+                status_area.error(f"❌ [{i}회차 검증 실패] 불순물(오류) 발견으로 자진 폐기되었습니다.\n사유: {judgment.get('reason')}")
+                break
+            time.sleep(0.5)
+            
+        if is_passed:
+            status_area.success(f"✨ [{loop_count}회 연속 검증 통과] 순도 100% 초순수 문제 완성!")
+            result_area.markdown(draft)
+            
+            st.download_button(
+                label="📥 검증된 마크다운(.md) 파일 다운로드",
+                data=draft,
+                file_name=f"{subject}_clean_problem.md",
+                mime="text/markdown"
             )
-            extracted_text = response.text
-            success = True
-            break
-          except Exception as e:
-            if attempt < 3:
-              time.sleep(4 * (attempt + 1))  # 4초, 8초, 12초 간격으로 여유 있게 재시도
-            else:
-              st.error(f"{page_num}페이지 처리 중 오류 발생: {e}")
-
-        if success:
-          full_result.append(f"<!-- 페이지 {page_num} -->\n" + extracted_text)
-
-        progress_bar.progress((idx + 1) / len(selected_pages))
-
-      if full_result:
-        final_output = "\n\n---\n\n".join(full_result)
-
-        st.success("🎉 추출이 완료되었습니다!")
-        st.text_area(
-            "📄 추출된 LaTeX / Markdown 소스:",
-            value=final_output,
-            height=400,
-        )
-
-        st.download_button(
-            label="📥 .md 파일로 다운로드",
-            data=final_output,
-            file_name="extracted_math_paper.md",
-            mime="text/markdown",
-        )
+    except Exception as e:
+        status_area.error(f"실행 중 오류가 발생했습니다: {e}")
